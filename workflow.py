@@ -85,6 +85,8 @@ def run_processing_groups(group: WorkflowGroup, output_dir: str, platform: str):
     latest_dim_file = None
     source_arg = None
     target_file = None
+    snaphu_phase_file = None
+    snaphu_unwrap_phase_file = None
     snaphu_target_dir = None
     kwargs = {}
 
@@ -125,6 +127,11 @@ def run_processing_groups(group: WorkflowGroup, output_dir: str, platform: str):
                     else:
                         source_arg += f'{flag}="{source}" '
             
+            # Override if SnaphuImport (Special case)
+            if operator == "SnaphuImport":
+                # SnaphuExport, SnaphuUnwrapping should've been done at this point
+                source_arg = f'-PwrappedPhase={snaphu_phase_file} -PunwrappedPhase={snaphu_unwrap_phase_file}'
+            
             #########################
             # Handle output file logic
             #########################
@@ -156,8 +163,12 @@ def run_processing_groups(group: WorkflowGroup, output_dir: str, platform: str):
                     datetime_str = group_data.datetimes[0]
                 target_file = os.path.join(output_dir, f'{datetime_str}.dim')
 
-            target_file = target_file.rstrip(".dim")
-            target_file += f'_{suffix}{".dim"}'
+            if suffix != "":
+                target_file = target_file.rstrip(".dim")
+                target_file += f'_{suffix}{".dim"}'
+
+            if operator == "SnaphuExport":
+                snaphu_phase_file = target_file
 
             #########################
             # Handle parameter logic
@@ -177,6 +188,12 @@ def run_processing_groups(group: WorkflowGroup, output_dir: str, platform: str):
             # Create GPT command
             if operator == "SnaphuExport":
                 cmd = f'gpt {operator} {parameters} {source_arg}'
+            elif operator == "Subset":
+                operator = os.path.join(os.path.dirname(__file__), "graphs", "subset.xml")
+                cmd = f'gpt {operator} {parameters} {source_arg} -PoutputFile="{target_file}"'
+            elif operator == "SnaphuImport":
+                operator = os.path.join(os.path.dirname(__file__), "graphs", "snaphuImport.xml")
+                cmd = f'gpt {operator} {parameters} {source_arg} -PoutputFile="{target_file}"'
             else:
                 cmd = f'gpt {operator} {parameters} {source_arg} -t "{target_file}"'
             cmd = cmd.replace("  ", " ")
@@ -196,6 +213,8 @@ def run_processing_groups(group: WorkflowGroup, output_dir: str, platform: str):
                                        Could not detect SnaphuExport targetFolder. \
                                        SnaphuExport needs to be in the same workflow.")
                 run_snaphu(snaphu_target_dir, process_group["parameters"])
+                snaphu_unwrap_phase_file = glob(os.path.join(snaphu_target_dir, "*", "UnwPhase*.snaphu.hdr"))[0]
+                
             else:
                 subprocess.call(cmd, shell=True)
 
@@ -226,7 +245,7 @@ def prepare_source_args(i: int, operator: str, group_data: WorkflowGroup, latest
 
     return source_arg
 
-def parse_processing_group(group_name, group, platform) -> WorkflowGroup:
+def parse_processing_group(group_name, group) -> WorkflowGroup:
 
     wg = WorkflowGroup()
     for i, item in enumerate(group):
@@ -245,7 +264,7 @@ def run(toml_file: str, platform: str, output_dir: str = ""):
     # Parse data into objects to help keep track of different processing groups
     workflow_groups = {}
     for group in config["workflow"]:
-        workflow_groups[group] = parse_processing_group(group, config["workflow"][group], platform)
+        workflow_groups[group] = parse_processing_group(group, config["workflow"][group])
         # Parse group processing steps into processing_steps property
         for process in config["workflow"][group]:
             workflow_groups[group].processing_steps.append(process)
