@@ -11,9 +11,11 @@ def operator_source_flags(operator: str):
         SNAP Operator as identified in the SNAP Graphs
     """
 
+    # TODO: This list seems to be expending with SsourceProduct only. We can create an array of operators and check for membership
     unique_cases = {
         "Interferogram": "SsourceProduct",
         "TopoPhaseRemoval": "SsourceProduct",
+        "Coherence": "SsourceProduct",
         "GoldsteinPhaseFiltering": "SsourceProduct",
         "Subset": "PinputFile"  # Workaround for bug. Using XML graph file
     }
