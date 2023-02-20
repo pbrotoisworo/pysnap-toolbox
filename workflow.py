@@ -315,5 +315,33 @@ def run_pair_batch_processing(toml_template: str, batch_folder: str, batch_pair_
     print("Processing", len(workflow_list), "scene pairs")
     for workflow in workflow_list:
         run(workflow, platform, output_dir)
+
 if __name__ == "__main__":
-    pass
+
+    # Define CLI flags and parse inputs
+    parser = argparse.ArgumentParser(description='pysnap-toolbox command line interface')
+
+    main_args = parser.add_argument_group('Global Parameters')
+    main_args.add_argument('--pattern', help='Optional glob pattern used to filter data for batch processing')
+    main_args.add_argument('--config', help='Input TOML config file for a single SNAP workflow or to be used as a template for batch processing')
+    main_args.add_argument('--output-dir', help='Output directory for processed data')
+    main_args.add_argument('--platform', help='Satellite platform that was used to capture the data')
+    main_args.add_argument("--cleanup", action='store_true', help='Clean up scratch files after workflow is finished')
+
+    pair_args = parser.add_argument_group("Batch Pair Processing")
+    pair_args.add_argument('--batch-pair', help='Input directory containing image data used as input for batch pair image processing')
+    pair_args.add_argument('--batch-pair-subtable', help='Target subtables used to identify the entry points in your TOML file. \
+                            A subtable can be seen as [[workflow.image1]] and [[workflow.image2]]. This would be a comma separated list \
+                           such as image1,image2. During pair processing the first image pair is considered the reference image. i.e., \
+                           image1 is considered the reference image and image2 is secondary.')    
+
+    args = parser.parse_args()
+    args = vars(args)
+
+    if not args["batch_pair"]:
+        run(args["config"], args["platform"], args["output_dir"], args["cleanup"])
+    else:
+        if not args["pattern"]:
+            args["pattern"] = "*"
+        run_pair_batch_processing(args["config"], args["batch_pair"], args["batch_pair_subtable"], args["platform"], args["output_dir"], args["pattern"], args["cleanup"])
+
