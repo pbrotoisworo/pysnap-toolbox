@@ -79,7 +79,7 @@ def get_datetime_from_source(platform: str, path: str) -> str:
         # Clean up
         shutil.rmtree(os.path.dirname(manifest))
 
-        return dt_obj.strftime(f"%Y%m%d")
+        return dt_obj
         
     raise ValueError(f"Unsupported platform: {platform}")
 
@@ -168,7 +168,8 @@ def run_processing_groups(group: WorkflowGroup, output_dir: str, platform: str):
                     last_str = f"{last.year}{last.month}{last.day}"
                     datetime_str = f'{first_str}_{last_str}'
                 else:
-                    datetime_str = group_data.datetimes[0]
+                    date = group_data.datetimes[0]
+                    datetime_str = f'{date.year}{date.month}{date.day}'
                 target_file = os.path.join(output_dir, f'{datetime_str}.dim')
 
             if suffix != "":
