@@ -207,6 +207,8 @@ def run_processing_groups(group: WorkflowGroup, output_dir: str, platform: str):
             latest_dim_file = target_file
             group_output_paths[group_name] = latest_dim_file
 
+    return latest_dim_file
+
 def prepare_source_args(i: int, operator: str, group_data: WorkflowGroup, latest_dim_file: str):
     
     source_arg = ""
@@ -238,7 +240,7 @@ def parse_processing_group(group_name, group) -> WorkflowGroup:
                 raise KeyError(f"Missing source in TOML config for processing group workflow.{group_name}")
     return wg
 
-def run(toml_template: Union[str, dict], platform: str, output_dir: str = "", cleanup: bool = True):
+def run(toml_template: Union[str, dict], platform: str, output_dir: str = "", cleanup_ignore_list: list = [], cleanup: bool = True):
 
     if isinstance(toml_template, str):
         with open(toml_template) as f:
@@ -256,18 +258,28 @@ def run(toml_template: Union[str, dict], platform: str, output_dir: str = "", cl
         # Parse group processing steps into processing_steps property
         for process in config["workflow"][group]:
             workflow_groups[group].processing_steps.append(process)
-    
-    # Run workflow groups
-    run_processing_groups(workflow_groups, output_dir, platform)
 
-def run_pair_batch_processing(toml_template: str, batch_folder: str, batch_pair_subtable: str, platform: str,
+    # Run workflow groups
+    protected_output_dim = run_processing_groups(workflow_groups, output_dir, platform)
+    protected_output_data = protected_output_dim.replace('.dim', '.data')
+
+    if cleanup:
+        dim_files = glob(os.path.join(output_dir, '*.dim'))
+        data_dirs = glob(os.path.join(output_dir, '*.data'))
+        for dim in dim_files:
+            if dim != protected_output_dim and dim not in cleanup_ignore_list:
+                os.remove(dim)
+        for data_dir in data_dirs:
+            if data_dir != protected_output_data and data_dir not in cleanup_ignore_list:
+                shutil.rmtree(data_dir)
+    return protected_output_dim, protected_output_data
+
+def run_pair_batch_processing(toml_template: str, batch_folder: str, platform: str,
                               output_dir: str = "", batch_folder_glob: str = "*", cleanup: bool = True,
                               ):
 
     with open(toml_template) as f:
         config = toml.load(f)
-    ref_subtable = batch_pair_subtable.split(",")[0]
-    sec_subtable = batch_pair_subtable.split(",")[1]
 
     # Get image pairs
     image_pairs = []
@@ -284,14 +296,40 @@ def run_pair_batch_processing(toml_template: str, batch_folder: str, batch_pair_
     workflow_list = []
     for image1, image2 in image_pairs:
         config_copy = copy.deepcopy(config)
-        config_copy["workflow"][ref_subtable][0]["source"] = image1
-        config_copy["workflow"][sec_subtable][0]["source"] = image2
+        config_copy["workflow"]["image1"][0]["source"] = image1
+        config_copy["workflow"]["image2"][0]["source"] = image2
         workflow_list.append(config_copy)
-    
+
     # Run workflows
     print("Processing", len(workflow_list), "scene pairs")
+    protected_data = []
     for workflow in workflow_list:
-        run(workflow, platform, output_dir)
+        output_dim, output_data = run(workflow, platform, output_dir, protected_data, cleanup=cleanup)
+        # If cleanup is enabled these files will be protected from cleanup
+        protected_data.append(output_dim)
+        protected_data.append(output_data)
+
+def download_s3(bucket: str, prefix:str, profile: str = "default"):
+    """
+    Iterate through a specified S3 bucket directory. The files will be sorted according
+    to their filename.
+    """
+    try:
+        import boto3
+    except ImportError as e:
+        raise ImportError("boto3 is not installed. Install boto3 in your environment to use this function.")
+
+    # create an S3 client object
+    session = boto3.Session(profile_name=profile)
+    s3 = session.client('s3')
+    # response = s3.list_buckets()
+    # for bucket in response['Buckets']:
+    #     print(f'  {bucket["Name"]}')
+    response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
+    for item in response['Contents']:
+        print(item['Key'])
+
+    return
 
 if __name__ == "__main__":
 
@@ -303,14 +341,17 @@ if __name__ == "__main__":
     main_args.add_argument('--config', help='Input TOML config file for a single SNAP workflow or to be used as a template for batch processing')
     main_args.add_argument('--output-dir', help='Output directory for processed data')
     main_args.add_argument('--platform', help='Satellite platform that was used to capture the data')
-    main_args.add_argument("--cleanup", action='store_true', help='Clean up scratch files after workflow is finished')
+    main_args.add_argument('--cleanup', action='store_true', help='Clean up scratch files after workflow is finished')
+    main_args.add_argument('--aws-profile', help="Name of the aws credential profile to use", default='default')
+    main_args.add_argument('--aws-bucket', help="Name of the AWS S3 bucket to access")
+    # main_args.add_argument('--subtables', help='Target subtables used to identify the entry points in your TOML file. \
+    #                     A subtable can be seen as [[workflow.image1]] and [[workflow.image2]]. This would be a comma separated list \
+    #                     such as image1,image2. During pair processing the first image pair is considered the reference image. i.e., \
+    #                     image1 is considered the reference image and image2 is secondary.')    
 
     pair_args = parser.add_argument_group("Batch Pair Processing")
-    pair_args.add_argument('--batch-pair', help='Input directory containing image data used as input for batch pair image processing')
-    pair_args.add_argument('--batch-pair-subtable', help='Target subtables used to identify the entry points in your TOML file. \
-                            A subtable can be seen as [[workflow.image1]] and [[workflow.image2]]. This would be a comma separated list \
-                           such as image1,image2. During pair processing the first image pair is considered the reference image. i.e., \
-                           image1 is considered the reference image and image2 is secondary.')    
+    pair_args.add_argument('--batch-pair', help='Input directory containing image data used as input for batch pair image processing. \
+                           Can be a local directory or an S3 URI link that starts with "s3://"')
 
     args = parser.parse_args()
     args = vars(args)
@@ -320,5 +361,6 @@ if __name__ == "__main__":
     else:
         if not args["pattern"]:
             args["pattern"] = "*"
-        run_pair_batch_processing(args["config"], args["batch_pair"], args["batch_pair_subtable"], args["platform"], args["output_dir"], args["pattern"], args["cleanup"])
+        run_pair_batch_processing(args["config"], args["batch_pair"], args["platform"], args["output_dir"], args["pattern"], args["cleanup"])
+
 
