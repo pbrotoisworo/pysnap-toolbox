@@ -25,63 +25,44 @@ class WorkflowGroup:
         self.latest_dim_path = None
         self.datetimes = []
 
+def get_datetime(platform: str, path: str):
 
-def get_datetime_from_dim(path: str) -> datetime:
-    """
-    Get datetime of scene from BEAM-DIMAP data
-    """
-    if path.startswith("$"):
-        # raise ValueError("Input dim path is not yet referenced. Still includes '$' character")
-        return
+    if path.endswith('.dim'):
     
-    tree = ET.parse(path)
-    root = tree.getroot()
-    datetime_str = root.find(".//PRODUCT_SCENE_RASTER_START_TIME")
-    if datetime_str is None:
-        raise LookupError(f"Cannot find datetime from BEAM-DIMAP file {path}")
-    
-    if "T" in datetime_str.text:
-        dt_obj = datetime.strptime(datetime_str.text, r"%Y-%m-%dT%H:%M:%S.%f")
-    else:
-        dt_obj = datetime.strptime(datetime_str.text, r"%d-%b-%Y %H:%M:%S.%f")
-    return dt_obj
-
-def get_datetime_from_source(platform: str, path: str) -> str:
-    """
-    Get datetime of scene from the original source of the data.
-    For Sentinel-1 this would be the .ZIP file.
-
-    Parameters
-    ----------
-    platform: str
-        Valid options are `SENTINEL-1`
-    """
-    if path.startswith("$"):
-        # raise ValueError("Input dim path is not yet referenced. Still includes '$' character")
-        return
-    if platform == "SENTINEL-1":
-        # Extract manifest.safe file
-        with ZipFile(path) as f:
-            manifest = None
-            for item in f.filelist:
-                if "manifest.safe" in item.filename:
-                    manifest = item.filename
-            f.extract(manifest, "")
-        
-        # Parse XML
-        tree = ET.parse(manifest)
-        metadata = tree.getroot()
-        datetime_str = metadata.find((".//safe:startTime"), {'safe': r"http://www.esa.int/safe/sentinel-1.0"})
+        tree = ET.parse(path)
+        root = tree.getroot()
+        datetime_str = root.find(".//PRODUCT_SCENE_RASTER_START_TIME")
         if datetime_str is None:
-            raise LookupError("cannot find scene start time in Sentinel-1 .SAFE file")
-        dt_obj = datetime.strptime(datetime_str.text, r"%Y-%m-%dT%H:%M:%S.%f")
+            raise LookupError(f"Cannot find datetime from BEAM-DIMAP file {path}")
         
-        # Clean up
-        shutil.rmtree(os.path.dirname(manifest))
+        if "T" in datetime_str.text:
+            dt_obj = datetime.strptime(datetime_str.text, r"%Y-%m-%dT%H:%M:%S.%f")
+        else:
+            dt_obj = datetime.strptime(datetime_str.text, r"%d-%b-%Y %H:%M:%S.%f")
 
-        return dt_obj
-        
-    raise ValueError(f"Unsupported platform: {platform}")
+    else:
+        if platform == "SENTINEL-1":
+            # Extract manifest.safe file
+            with ZipFile(path) as f:
+                manifest = None
+                for item in f.filelist:
+                    if "manifest.safe" in item.filename:
+                        manifest = item.filename
+                f.extract(manifest, "")
+            
+            # Parse XML
+            tree = ET.parse(manifest)
+            metadata = tree.getroot()
+            datetime_str = metadata.find((".//safe:startTime"), {'safe': r"http://www.esa.int/safe/sentinel-1.0"})
+            if datetime_str is None:
+                raise LookupError("cannot find scene start time in Sentinel-1 .SAFE file")
+            dt_obj = datetime.strptime(datetime_str.text, r"%Y-%m-%dT%H:%M:%S.%f")
+            
+            # Clean up
+            shutil.rmtree(os.path.dirname(manifest))
+        else:
+            raise ValueError(f"Unsupported sensor: {platform}")
+    return dt_obj
 
 def run_processing_groups(group: WorkflowGroup, output_dir: str, platform: str):
 
@@ -150,14 +131,9 @@ def run_processing_groups(group: WorkflowGroup, output_dir: str, platform: str):
             for source in group_data.source:
                 if source.startswith("$"):
                     source = group_output_paths[source.lstrip("$")]
-                if source.endswith(".dim"):
-                    dt = get_datetime_from_dim(source)
-                    if dt is not None:
-                        group_data.datetimes.append(dt)
-                else:
-                    dt = get_datetime_from_source(platform, source)
-                    if dt is not None:
-                        group_data.datetimes.append(dt)
+                dt = get_datetime(platform, source)
+                if dt is not None:
+                    group_data.datetimes.append(dt)
 
             if i == 0:
                 if operator == "Back-Geocoding":
