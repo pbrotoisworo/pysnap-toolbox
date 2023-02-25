@@ -379,7 +379,7 @@ if __name__ == "__main__":
     args = vars(args)
 
     if not args["batch"]:
-        run(args["config"], args["platform"], args["output_dir"], args["cleanup"])
+        run(args["config"], args["platform"], args["output_dir"], [], args["cleanup"])
     else:
         if not args["pattern"]:
             args["pattern"] = "*"
