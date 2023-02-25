@@ -5,6 +5,7 @@ from glob import glob
 import os
 import shutil
 import subprocess
+import sys
 import toml
 from typing import Union
 import xml.etree.ElementTree as ET
@@ -368,6 +369,9 @@ def run_batch_processing(**kwargs):
     os.makedirs(out_tmp, exist_ok=True)
     for workflow in workflow_list:
 
+        # TODO: Add logic to only delete data when necessary
+        # It currently deletes/redownloads after every group
+
         # Check if S3 URIs and download beforehand
         for subtable in batch_subtables:
             source = workflow["workflow"][subtable][0]["source"]
@@ -385,7 +389,7 @@ def run_batch_processing(**kwargs):
     # Remove tmp dir once done
     shutil.rmtree(out_tmp)
 
-def download_s3(bucket: str, prefix: str, output_file: str, profile: str = "default"):
+def download_s3(s3_uri: str, output_file: str, profile: str = "default"):
     """
     Download file from AWS S3
     """
@@ -393,9 +397,28 @@ def download_s3(bucket: str, prefix: str, output_file: str, profile: str = "defa
         import boto3
     except ImportError:
         raise ImportError("boto3 is not installed. Install boto3 in your environment to use this function.")
+
+    path_parts = s3_uri.replace("s3://","").split("/")
+    bucket = path_parts.pop(0)
+    prefix = "/".join(path_parts)
+
     session = boto3.Session(profile_name=profile)
-    s3 = session.resource('s3')
-    s3.Bucket(bucket).download_file(prefix, output_file)
+    s3 = session.client('s3')
+    
+    # Download progress
+    meta_data = s3.head_object(Bucket=bucket, Key=prefix)
+    total_length = int(meta_data.get('ContentLength', 0))
+    downloaded = 0
+    def progress(chunk):
+        nonlocal downloaded
+        downloaded += chunk
+        done = int(50 * downloaded / total_length)
+        sys.stdout.write("\r[%s%s]" % ('=' * done, ' ' * (50-done)) )
+        sys.stdout.flush()
+    print(f"INFO: Downloading from AWS S3 {s3_uri}")
+    with open(output_file, 'wb') as f:
+        s3.download_fileobj(bucket, prefix, f, Callback=progress)
+    print()
     return
 
 if __name__ == "__main__":
