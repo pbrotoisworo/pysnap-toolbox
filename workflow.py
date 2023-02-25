@@ -1,5 +1,5 @@
 import argparse
-import copy
+from copy import deepcopy
 from datetime import datetime
 from glob import glob
 import os
@@ -237,6 +237,8 @@ def parse_processing_group(group_name, group) -> WorkflowGroup:
         if i == 0:
             wg.source = item.get("source")
             if not wg.source:
+                print("ERROR: Missing source in TOML config")
+                print(group)
                 raise KeyError(f"Missing source in TOML config for processing group workflow.{group_name}")
     return wg
 
@@ -274,34 +276,52 @@ def run(toml_template: Union[str, dict], platform: str, output_dir: str = "", cl
                 shutil.rmtree(data_dir)
     return protected_output_dim, protected_output_data
 
-def run_pair_batch_processing(toml_template: str, batch_folder: str, platform: str,
+def run_batch_processing(toml_template: str, batch_folder: str, batch_subtables: str, platform: str,
                               output_dir: str = "", batch_folder_glob: str = "*", cleanup: bool = True,
-                              ):
+                              step: int = 1):
+    """
+    Run batch processing using a TOML file as a reference file. The data in input directory path `batch_folder`
+    will automatically be inserted as the source for each processing item.
+    """
 
     with open(toml_template) as f:
         config = toml.load(f)
 
-    # Get image pairs
-    image_pairs = []
+    # Get image batches
+    image_batches = []
     glob_files = glob(os.path.join(batch_folder, batch_folder_glob))
-    for i in range(len(glob_files)):
-        pair0 = glob_files[i]
-        try:
-            pair1 = glob_files[i+1]
-        except IndexError:
-            break
-        image_pairs.append((pair0, pair1))
-
-    # Iterate through pairs and apply relevant paths to TOML template
+    batch_subtables = batch_subtables.split(',')
+    batch_size = len(batch_subtables)
+    # Iterate through files
+    for i in range(0, len(glob_files), step):
+        if i + batch_size <= len(glob_files):
+            batch = []
+            # Get batch size according to the size of entry points
+            for j in range(batch_size):
+                try:
+                    batch.append(glob_files[i+j])
+                except IndexError:
+                    break
+            image_batches.append(batch)
+    
     workflow_list = []
-    for image1, image2 in image_pairs:
-        config_copy = copy.deepcopy(config)
-        config_copy["workflow"]["image1"][0]["source"] = image1
-        config_copy["workflow"]["image2"][0]["source"] = image2
+    # construct workflow from batches
+    for batch in image_batches:
+        # Make a copy of the config file which will be appended to the workflow list
+        config_copy = deepcopy(config)
+        for i, image in enumerate(batch):
+            config_copy["workflow"][batch_subtables[i]][0]["source"] = image
         workflow_list.append(config_copy)
 
+    # Save a copy of full workflow to TOML file for reference
+    toml_out = {}
+    for i, workflow in enumerate(workflow_list):
+        toml_out[str(i)] = workflow["workflow"]
+    with open(os.path.join(output_dir, "workflow.toml"), "w") as f:
+        toml.dump(toml_out, f)
+
     # Run workflows
-    print("Processing", len(workflow_list), "scene pairs")
+    # print("Processing", len(workflow_list), "scene pairs")
     protected_data = []
     for workflow in workflow_list:
         output_dim, output_data = run(workflow, platform, output_dir, protected_data, cleanup=cleanup)
@@ -344,23 +364,25 @@ if __name__ == "__main__":
     main_args.add_argument('--cleanup', action='store_true', help='Clean up scratch files after workflow is finished')
     main_args.add_argument('--aws-profile', help="Name of the aws credential profile to use", default='default')
     main_args.add_argument('--aws-bucket', help="Name of the AWS S3 bucket to access")
-    # main_args.add_argument('--subtables', help='Target subtables used to identify the entry points in your TOML file. \
-    #                     A subtable can be seen as [[workflow.image1]] and [[workflow.image2]]. This would be a comma separated list \
-    #                     such as image1,image2. During pair processing the first image pair is considered the reference image. i.e., \
-    #                     image1 is considered the reference image and image2 is secondary.')    
 
-    pair_args = parser.add_argument_group("Batch Pair Processing")
-    pair_args.add_argument('--batch-pair', help='Input directory containing image data used as input for batch pair image processing. \
+    batch_args = parser.add_argument_group("Batch Processing")
+    batch_args.add_argument('--batch', help='Input directory containing image data used as input for batch image processing. \
                            Can be a local directory or an S3 URI link that starts with "s3://"')
+    batch_args.add_argument('--batch-step', help="Number of files to skip ahead in a folder when a batch of files is done.", default=1)
+    batch_args.add_argument('--batch-subtables', help='Target subtables used to identify the entry points in your TOML file. \
+                    The number of entry points indicate the number of files that will be processed per batch (batch size). \
+                    A subtable can be seen as [[workflow.image1]] and [[workflow.image2]]. This would be a comma separated list \
+                    such as image1,image2. During pair processing the first image pair is considered the reference image. i.e., \
+                    image1 is considered the reference image and image2 is secondary.')
 
     args = parser.parse_args()
     args = vars(args)
 
-    if not args["batch_pair"]:
+    if not args["batch"]:
         run(args["config"], args["platform"], args["output_dir"], args["cleanup"])
     else:
         if not args["pattern"]:
             args["pattern"] = "*"
-        run_pair_batch_processing(args["config"], args["batch_pair"], args["platform"], args["output_dir"], args["pattern"], args["cleanup"])
+        run_batch_processing(args["config"], args["batch"], args["batch_subtables"], args["platform"], args["output_dir"], args["pattern"], args["cleanup"], args["batch_step"])
 
 
