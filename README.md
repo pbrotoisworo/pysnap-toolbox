@@ -4,15 +4,18 @@ A lightweight python wrapper for [ESA SNAP software](https://step.esa.int/main/d
 The goal of this script is to allow users to easily create and share SNAP processing workflows. This skips the clutter that is in XML graphs and allows users to focus only on the important aspects such as choosing the operator, sources, and relevant parameters. If no parameters are specified then processing will use the default values which are defined by SNAP.
 
 # Unique tools
-## Custom SNAP operators
+### Custom SNAP operators
 Custom operators allow users to use popular community-generated workflows or workflows done by third-party software such as [SNAPHU](http://web.stanford.edu/group/radar/softwareandlinks/sw/snaphu/). As of now, the only custom operator is `SnaphuUnwrapping` which
 automates transferring all the files to the SNAPHU bin directory for unwrapping, copying the command from the `snaphu.conf` file and running it, then copying it back to the original `SnaphuExport` directory.
 
-## Filename management
+### Filename management
 The TOML input file only needs a source key for each workflow subtable. Filename management is automatically managed and follows the SNAP file naming conventions when possible.
 
-## Automated cleanup
+### Automated cleanup
 If specified, pysnap-toolbox can automatically cleanup intermediate scratch files generated during processing to help minimize the space consumed by the data.
+
+### Batch processing
+Process large amounts of data using a TOML file as a template. The workflow set in the TOML file will be replicated to each processing item and sources will automatically be set according to the files of the input folder.
 # SNAP XML vs pysnap-toolbox TOML
 
 Here is a small sample comparing SNAP's native XML graph vs pysnap-toolbox's TOML config. We are applying these steps:
