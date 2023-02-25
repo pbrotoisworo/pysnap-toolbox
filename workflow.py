@@ -289,17 +289,16 @@ def run_batch_processing(toml_template: str, batch_folder: str, batch_subtables:
 
     # Get image batches
     image_batches = []
-    glob_files = glob(os.path.join(batch_folder, batch_folder_glob))
     batch_subtables = batch_subtables.split(',')
     batch_size = len(batch_subtables)
     # Iterate through files
-    for i in range(0, len(glob_files), step):
-        if i + batch_size <= len(glob_files):
+    for i in range(0, len(files), step):
+        if i + batch_size <= len(files):
             batch = []
             # Get batch size according to the size of entry points
             for j in range(batch_size):
                 try:
-                    batch.append(glob_files[i+j])
+                    batch.append(files[i+j])
                 except IndexError:
                     break
             image_batches.append(batch)
