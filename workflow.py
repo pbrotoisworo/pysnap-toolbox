@@ -25,6 +25,15 @@ class WorkflowGroup:
         self.latest_dim_path = None
         self.datetimes = []
 
+def get_cli_flag(d: dict, v: any) -> any:
+    """
+    Quick helper function to check dict from CLI and raise an error if None.
+    """
+    output = d.get(v)
+    if output is None:
+        raise KeyError(f"CLI flag '{v}' is required but is empty.")
+    return output
+
 def get_datetime(platform: str, path: str):
 
     if path.endswith('.dim'):
@@ -114,7 +123,7 @@ def run_processing_groups(group: WorkflowGroup, output_dir: str, platform: str):
                         source_count +=1
                     else:
                         source_arg += f'{flag}="{source}" '
-            
+
             # Override if SnaphuImport (Special case)
             if operator == "SnaphuImport":
                 # SnaphuExport, SnaphuUnwrapping should've been done at this point
@@ -276,17 +285,48 @@ def run(toml_template: Union[str, dict], platform: str, output_dir: str = "", cl
                 shutil.rmtree(data_dir)
     return protected_output_dim, protected_output_data
 
-def run_batch_processing(toml_template: str, batch_folder: str, batch_subtables: str, platform: str,
-                              output_dir: str = "", batch_folder_glob: str = "*", cleanup: bool = True,
-                              step: int = 1):
+def run_batch_processing(**kwargs):
     """
     Run batch processing using a TOML file as a reference file. The data in input directory path `batch_folder`
     will automatically be inserted as the source for each processing item.
     """
 
+    # required kwargs
+    toml_template = get_cli_flag(kwargs, "config")
+    batch_folder = get_cli_flag(kwargs, "batch")
+    batch_subtables = get_cli_flag(kwargs, "batch_subtables")
+    platform = get_cli_flag(kwargs, "platform")
+    output_dir = get_cli_flag(kwargs, "output_dir")
+    batch_folder_glob = get_cli_flag(kwargs, "pattern")
+    cleanup = get_cli_flag(kwargs, "cleanup")
+    step = int(get_cli_flag(kwargs, "batch_step"))
+
     with open(toml_template) as f:
         config = toml.load(f)
 
+    # Get files
+    if batch_folder.startswith("s3://"):
+
+        import boto3
+
+        # required kwargs
+        aws_profile = get_cli_flag(kwargs, "aws_profile")
+        path_parts = batch_folder.replace("s3://","").split("/")
+        bucket = path_parts.pop(0)
+        prefix = "/".join(path_parts)
+        
+        # create an S3 client object
+        session = boto3.Session(profile_name=aws_profile)
+        s3 = session.client("s3")
+        response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
+        files = []
+        for i, item in enumerate(response['Contents']):
+            # Skip the first item because it is the parent directory
+            if i == 0:
+                continue
+            files.append("s3://" + bucket + '/' + item["Key"])
+    else:
+        files = glob(os.path.join(batch_folder, batch_folder_glob))
     # Get image batches
     image_batches = []
     batch_subtables = batch_subtables.split(',')
@@ -322,32 +362,40 @@ def run_batch_processing(toml_template: str, batch_folder: str, batch_subtables:
     # Run workflows
     # print("Processing", len(workflow_list), "scene pairs")
     protected_data = []
+    aws_profile = get_cli_flag(kwargs, "aws_profile")
+    # Tmp dir used for s3 data if needed
+    out_tmp = os.path.join(output_dir, "tmp")
+    os.makedirs(out_tmp, exist_ok=True)
     for workflow in workflow_list:
+
+        # Check if S3 URIs and download beforehand
+        for subtable in batch_subtables:
+            source = workflow["workflow"][subtable][0]["source"]
+            if source.startswith("s3://"):
+                outfile = os.path.join(out_tmp, os.path.basename(source))
+                download_s3(source, outfile, aws_profile)
+                # Set source to local file instead of S3 URI
+                workflow["workflow"][subtable][0]["source"] = outfile
+                
         output_dim, output_data = run(workflow, platform, output_dir, protected_data, cleanup=cleanup)
         # If cleanup is enabled these files will be protected from cleanup
         protected_data.append(output_dim)
         protected_data.append(output_data)
+    
+    # Remove tmp dir once done
+    shutil.rmtree(out_tmp)
 
-def download_s3(bucket: str, prefix:str, profile: str = "default"):
+def download_s3(bucket: str, prefix: str, output_file: str, profile: str = "default"):
     """
-    Iterate through a specified S3 bucket directory. The files will be sorted according
-    to their filename.
+    Download file from AWS S3
     """
     try:
         import boto3
-    except ImportError as e:
+    except ImportError:
         raise ImportError("boto3 is not installed. Install boto3 in your environment to use this function.")
-
-    # create an S3 client object
     session = boto3.Session(profile_name=profile)
-    s3 = session.client('s3')
-    # response = s3.list_buckets()
-    # for bucket in response['Buckets']:
-    #     print(f'  {bucket["Name"]}')
-    response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
-    for item in response['Contents']:
-        print(item['Key'])
-
+    s3 = session.resource('s3')
+    s3.Bucket(bucket).download_file(prefix, output_file)
     return
 
 if __name__ == "__main__":
@@ -362,7 +410,6 @@ if __name__ == "__main__":
     main_args.add_argument('--platform', help='Satellite platform that was used to capture the data')
     main_args.add_argument('--cleanup', action='store_true', help='Clean up scratch files after workflow is finished')
     main_args.add_argument('--aws-profile', help="Name of the aws credential profile to use", default='default')
-    main_args.add_argument('--aws-bucket', help="Name of the AWS S3 bucket to access")
 
     batch_args = parser.add_argument_group("Batch Processing")
     batch_args.add_argument('--batch', help='Input directory containing image data used as input for batch image processing. \
@@ -382,6 +429,6 @@ if __name__ == "__main__":
     else:
         if not args["pattern"]:
             args["pattern"] = "*"
-        run_batch_processing(args["config"], args["batch"], args["batch_subtables"], args["platform"], args["output_dir"], args["pattern"], args["cleanup"], args["batch_step"])
+        run_batch_processing(**args)
 
 
