@@ -84,18 +84,21 @@ class Runner:
         # Initialize namespace
         self.namespace = self.config["sources"]
 
-    def _get_multiple_source_file_arg(self, op: str, sources):
-        flag = "Ssource"
-        output = ""
-        for i, source in enumerate(sources.split(","), 1):
-            output += f'{flag}{i}="{source}" '
-        return output
+    # def _get_multiple_source_file_arg(self, op: str, sources):
+    #     flag = "Ssource"
+    #     output = ""
+    #     for i, source in enumerate(sources.split(","), 1):
+    #         output += f'{flag}{i}="{source}" '
+    #     return output
 
     def generate_cli_command(self, op: str, sources: str, target: str, param: dict):
         
         if op in ["Back-Geocoding"]:
+            # The sources will be the first arguments without any flag such as:
+            # gpt Back-Geocoding img1.dim img2.dim param1=foo param2=bar
             cmd = f'gpt {op} '
-            cmd += self._get_multiple_source_file_arg(op, sources) + " "
+            for file in sources.split(","):
+                cmd += file + " "
         else:
             source_flag = operator_source_flags(op)
             cmd = f'gpt {op} -S{source_flag}="{sources}"'
@@ -167,7 +170,7 @@ class Runner:
                 cmd = self.generate_cli_command(action.get("operator"), source, target_file, action.get("parameters"))
                 print("DEBUG CMD", cmd)
                 # Run CLI command using subprocess
-                # subprocess.call(cmd, shell=True)
+                subprocess.call(cmd, shell=True)
 
                 # Update path namespace after every action
                 self.namespace[section] = target_file
