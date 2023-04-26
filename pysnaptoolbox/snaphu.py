@@ -11,21 +11,17 @@ def load_conf_param_index(param: str, lines: list) -> int:
     """
     Get location of index containing specified parameter when loading
     param using f.readlines().
-
     Parameters
     ----------
-
     param: str
         Parameter to search for.
     lines: list
         List containing conf file read by using readlines() method.
-
     Returns
     -------
     int
         Index containing location of desired parameter in the input 
         list
-
     """
     # Load a tuple (i, param) where i is the index of param in the list
     line = [(i, x) for (i, x) in enumerate(lines) if param in x]
@@ -41,11 +37,8 @@ def prep_snaphu(
     Load and prepare the conf file for SNAPHU phase unwrapping.
     For tiled processing the user must specify the number of columns
     and rows using n_cols and n_rows respectively.
-
     This method also loads the relevant command used to run SNAPHU and
     sets the snaphu_cmd Class property.
-
-
     Parameters
     ----------
     conf_file: str
@@ -54,7 +47,6 @@ def prep_snaphu(
     Returns
     -------
     None
-
     """
 
     with open(conf_file, 'r') as f:
@@ -92,14 +84,12 @@ def transfer_snaphu_files(src_dir: str, dst_dir: str) -> None:
     """
     Transfer coherence, phase, unwrapped phase, and conf files to and
     from the SNAPHU bin directory
-
     Parameters
     ----------
     src_dir: str
         Path of directory contaning SNAPHU files.
     dst_dir: bool
         Path of directory where SNAPHU files should be moved to.
-
     """
     # Get SNAPHU files
     coh_files = glob(os.path.join(src_dir, 'coh_*'))

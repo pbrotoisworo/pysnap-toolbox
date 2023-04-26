@@ -11,8 +11,9 @@ from typing import Union
 import xml.etree.ElementTree as ET
 from zipfile import ZipFile
 
-from operators import default_operator_suffix, operator_source_flags
+from pysnaptoolbox.operators import get_output_suffix, operator_source_flags
 from snaphu import run_snaphu
+from pysnaptoolbox.config import TomlConfig
 
 
 class WorkflowGroup:
@@ -51,6 +52,7 @@ def get_datetime(platform: str, path: str):
             dt_obj = datetime.strptime(datetime_str.text, r"%d-%b-%Y %H:%M:%S.%f")
 
     else:
+        platform = platform.upper()
         if platform == "SENTINEL-1":
             # Extract manifest.safe file
             with ZipFile(path) as f:
@@ -136,7 +138,7 @@ def run_processing_groups(group: WorkflowGroup, output_dir: str, platform: str):
             # TODO: Special cases (separate funcs?) for operators instead of a bunch of nested statements
             if operator == "TOPSAR-Split":
                 kwargs["subswath"] = process_group["parameters"]["subswath"]
-            suffix = default_operator_suffix(operator, **kwargs)
+            suffix = get_output_suffix(operator, **kwargs)
 
             for source in group_data.source:
                 if source.startswith("$"):
@@ -252,24 +254,18 @@ def parse_processing_group(group_name, group) -> WorkflowGroup:
                 raise KeyError(f"Missing source in TOML config for processing group workflow.{group_name}")
     return wg
 
-def run(toml_template: Union[str, dict], platform: str, output_dir: str = "", cleanup_ignore_list: list = [], cleanup: bool = True):
+def run(toml_template: str, platform: str, output_dir: str = "", cleanup_ignore_list: list = [], cleanup: bool = True):
 
-    if isinstance(toml_template, str):
-        with open(toml_template) as f:
-            config = toml.load(f)
-    elif isinstance(toml_template, dict):
-        config = toml_template
-    else:
-        raise RuntimeError("toml template for run() function only supports dict or str inputs")    
+    config = TomlConfig(toml_template)
     
-    # Parse pysnaptoolbox TOML reference
-    # Parse data into objects to help keep track of different processing groups
-    workflow_groups = {}
-    for group in config["workflow"]:
-        workflow_groups[group] = parse_processing_group(group, config["workflow"][group])
-        # Parse group processing steps into processing_steps property
-        for process in config["workflow"][group]:
-            workflow_groups[group].processing_steps.append(process)
+    # # Parse pysnaptoolbox TOML reference
+    # # Parse data into objects to help keep track of different processing groups
+    # workflow_groups = {}
+    # for group in config["workflow"]:
+    #     workflow_groups[group] = parse_processing_group(group, config["workflow"][group])
+    #     # Parse group processing steps into processing_steps property
+    #     for process in config["workflow"][group]:
+    #         workflow_groups[group].processing_steps.append(process)
 
     # Run workflow groups
     protected_output_dim = run_processing_groups(workflow_groups, output_dir, platform)
@@ -453,5 +449,3 @@ if __name__ == "__main__":
         if not args["pattern"]:
             args["pattern"] = "*"
         run_batch_processing(**args)
-
-
